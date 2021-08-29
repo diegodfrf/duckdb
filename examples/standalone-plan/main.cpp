@@ -3,7 +3,12 @@
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/planner/operator/logical_filter.hpp"
+#include "duckdb/planner/operator/logical_order.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
+#include "duckdb/planner/operator/logical_projection.hpp"
+#include "duckdb/planner/operator/logical_limit.hpp"
+#include "duckdb/planner/operator/logical_top_n.hpp"
+#include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/function/table/table_scan.hpp"
 #include "duckdb/planner/expression.hpp"
@@ -104,7 +109,7 @@ void RunCustomFunctionDuckDB() {
 	// we can use our own table functions (see RunExampleTableScan), but this is slightly more involved
 
 	DBConfig config;
-	config.initialize_default_database = false;
+	config.initialize_default_database = true;
 
 	// disable the statistics propagator optimizer
 	// this is required since the statistics propagator will truncate our plan
@@ -125,6 +130,22 @@ void RunCustomFunctionDuckDB() {
 	// register dummy tables (for our binding purposes)
 	con.Query("CREATE TABLE mytable(i INTEGER, j INTEGER)");
 	con.Query("CREATE TABLE myothertable(k INTEGER)");
+	con.Query(R"(create table lineitem ( l_orderkey    integer ,
+                             l_partkey     integer ,
+                             l_suppkey     integer ,
+                             l_linenumber  integer ,
+                             l_quantity    decimal(15,2) ,
+                             l_extendedprice  decimal(15,2) ,
+                             l_discount    decimal(15,2) ,
+                             l_tax         decimal(15,2) ,
+                             l_returnflag  char(1) ,
+                             l_linestatus  char(1) ,
+                             l_shipdate    date ,
+                             l_commitdate  date ,
+                             l_receiptdate date ,
+                             l_shipinstruct char(25) ,
+                             l_shipmode     char(10) ,
+						     l_comment      varchar(44) ))");
 	// contents of the tables
 	// mytable:
 	// i: 1, 2, 3, 4, 5
@@ -134,32 +155,71 @@ void RunCustomFunctionDuckDB() {
 	// (see MyScanNode)
 
 	// register functions and aggregates (for our binding purposes)
-	CreateFunction(con, "+", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
-	CreateFunction(con, "isnull", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
-	CreateAggregateFunction(con, "count_star", {}, LogicalType::BIGINT);
-	CreateAggregateFunction(con, "sum", {LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateFunction(con, "*", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateFunction(con, "+", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateFunction(con, "-", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateFunction(con, "isnull", {LogicalType::INTEGER, LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateAggregateFunction(con, "count_star", {}, LogicalType::BIGINT);
+//	CreateAggregateFunction(con, "sum", {LogicalType::INTEGER}, LogicalType::INTEGER);
+//	CreateAggregateFunction(con, "avg", {LogicalType::INTEGER}, LogicalType::INTEGER);
 
 	con.Query("COMMIT");
 
 	// standard projections
-	//ExecuteQuery(con, "SELECT coalesce(i, 0) FROM mytable");//OK
-	//ExecuteQuery(con, "SELECT ifnull(i, 0) FROM mytable");//OK
-	//ExecuteQuery(con, "SELECT isnull(i, 0) FROM mytable");//ERROR
-	/*ExecuteQuery(con, "SELECT * FROM mytable");
-	ExecuteQuery(con, "SELECT i FROM mytable");
-	ExecuteQuery(con, "SELECT j FROM mytable");
-	ExecuteQuery(con, "SELECT k FROM myothertable");*/
-	// some simple filter + projection
-	ExecuteQuery(con, "SELECT i+1 FROM mytable WHERE i=3 OR i=4");
-	// more complex filters
-	/*ExecuteQuery(con, "SELECT i+1 FROM mytable WHERE (i<=2 AND j<=3) OR (i=4 AND j=5)");
-	// aggregate
-	ExecuteQuery(con, "SELECT COUNT(*), SUM(i) + 1, SUM(j) + 2 FROM mytable WHERE i>2");
-	// with a subquery
-	ExecuteQuery(con,
-	             "SELECT a, b + 1, c + 2 FROM (SELECT COUNT(*), SUM(i), SUM(j) FROM mytable WHERE i > 2) tbl(a, b, c)");*/
-}
+	//	ExecuteQuery(con, "SELECT coalesce(i, 0) FROM mytable");//OK
+	//	ExecuteQuery(con, "SELECT ifnull(i, 0) FROM mytable");//OK
+	//	ExecuteQuery(con, "SELECT isnull(i, 0) FROM mytable");//ERROR
+	//	ExecuteQuery(con, "SELECT * FROM mytable");
+	//	ExecuteQuery(con, "SELECT i FROM mytable");
+	//	ExecuteQuery(con, "SELECT j FROM mytable");
+	//	ExecuteQuery(con, "SELECT k FROM myothertable");
+	//	// some simple filter + projection
+	//	ExecuteQuery(con, "SELECT i+1 FROM mytable WHERE i=3 OR i=4");
+	//	ExecuteQuery(con, "SELECT * FROM mytable WHERE i>4 order by i desc, j desc");
+	//	ExecuteQuery(con, "SELECT * FROM mytable t1 join mytable t2 on t1.i=t2.j");
+	//	// more complex filters
+	//	ExecuteQuery(con, "SELECT i+1 FROM mytable WHERE (i<=2 AND j<=3) OR (i=4 AND j=5)");
+	//	// aggregate
+	//	ExecuteQuery(con, "SELECT COUNT(*), SUM(i) + 1, SUM(j) + 2 FROM mytable WHERE i>2");
+	//	// with a subquery
+	//	ExecuteQuery(con,
+	//	             "SELECT a, b + 1, c + 2 FROM (SELECT COUNT(*), SUM(i), SUM(j) FROM mytable WHERE i > 2) tbl(a, b, c)");
+//		ExecuteQuery(con, R"(select
+//	                l_returnflag,
+//	                l_linestatus,
+//	                sum(l_quantity) as sum_qty,
+//	                sum(l_extendedprice) as sum_base_price,
+//	                sum(l_extendedprice*(1-l_discount)) as sum_disc_price,
+//	                sum(l_extendedprice*(1-l_discount)*(1+l_tax))
+//	                    as sum_charge,
+//	                avg(l_quantity) as avg_qty,
+//	                avg(l_extendedprice) as avg_price,
+//	                avg(l_discount) as avg_disc,
+//	                count(*) as count_order
+//	            from
+//	                lineitem
+//	            where
+//	                l_shipdate <= date '1998-12-01' - interval '90' day
+//	            group by
+//	                l_returnflag,
+//	                l_linestatus
+//	            order by
+//	                l_returnflag,
+//		l_linestatus)");
 
+//
+//	ExecuteQuery(con, R"(select
+//	                l_returnflag,
+//	                l_linestatus
+//	            from
+//	                lineitem
+//				where l_linenumber=3 OR l_linenumber=4
+//				order by l_linestatus desc
+//				limit 5 offset 3)");
+	ExecuteQuery(con, R"(select l_linenumber from lineitem where l_quantity > 4)");
+//	ExecuteQuery(con, R"(SELECT l_linenumber FROM lineitem WHERE l_linenumber=3 OR l_linenumber=4)");
+//	ExecuteQuery(con, R"(SELECT avg(l_linenumber) FROM lineitem)");
+}
 //===--------------------------------------------------------------------===//
 // Example Using Custom Scan Function
 //===--------------------------------------------------------------------===//
@@ -215,12 +275,6 @@ void RunExampleTableScan() {
 	// with a subquery
 	ExecuteQuery(con,
 	             "SELECT a, b + 1, c + 2 FROM (SELECT COUNT(*), SUM(i), SUM(j) FROM mytable WHERE i > 2) tbl(a, b, c)");
-}
-
-int main() {
-	//RunExampleDuckDBCatalog();
-	//RunExampleTableScan();
-	RunCustomFunctionDuckDB();
 }
 
 //===--------------------------------------------------------------------===//
@@ -348,49 +402,388 @@ public:
 	unique_ptr<MyNode> TransformPlan(LogicalOperator &op);
 };
 
+int32_t level = 0;
+
+void printTabs(){
+	std::cout << "[" << level << "]";
+	for(int32_t i = 0; i < level; ++i)
+	{
+		std::cout << "  ";
+	}
+}
+
 void Imprimir(unique_ptr<LogicalOperator> op){
-	std::cout<<"Name: "<<op->GetName()<<"\n";
-	std::cout<<"Params: "<<op->ParamsToString()<<"\n";
+	/*std::cout<<"Name: "<<op->GetName()<<"\n";
+	std::cout<<"type: "<<(int)op->type<<"\n";*/
+	/*std::cout<<"Params: "<<op->ParamsToString()<<"\n";
 
 	for(auto& exp : op->expressions){
-		std::cout<<"exp: "<<exp->GetName()<<"\n";
-		std::cout<<"alias: "<<exp->alias<<"\n";
+	    std::cout<<"exp: "<<exp->GetName()<<"\n";
+	    std::cout<<"alias: "<<exp->alias<<"\n";
 	}
-	std::cout<<"\n";
+	std::cout<<"\n";*/
 
 	std::string dsl_calcite = "";
 
 	switch (op->type) {
-		case LogicalOperatorType::LOGICAL_PROJECTION:
-			dsl_calcite = "";
+	case LogicalOperatorType::LOGICAL_FILTER:
+	{
+		auto logOp = unique_ptr<LogicalFilter>{static_cast<LogicalFilter*>(op.release())};
+		if(!logOp) std::cout<<"Error at cast!\n";
+		/*auto vec = logOp->GetColumnBindings();
+		for(auto col : vec){
+		    std::cout<<" - "<<col.table_index<<" - "<<col.column_index<<" ";
+		}
+		std::cout<<"\n";*/
+		logOp->SplitPredicates();
+		/*for(auto& exp : logOp->expressions){
+		    std::cout<<"exp2: "<<exp->GetName()<<"\n";
+		    std::cout<<"alias2: "<<exp->alias<<"\n";
+		}*/
+		op = unique_ptr<LogicalOperator>{static_cast<LogicalOperator*>(logOp.release())};
+		dsl_calcite = "LogicalFilter(condition=[" + op->ParamsToString() + "])";
+	}
+	break;
+	case LogicalOperatorType::LOGICAL_GET:
+		dsl_calcite = "LogicalTableScan(table=[[" + op->ParamsToString() + "]])";
 		break;
-		case LogicalOperatorType::LOGICAL_FILTER:
-			auto logOp = unique_ptr<LogicalFilter>{static_cast<LogicalFilter*>(op.release())};
-			if(!logOp) std::cout<<"Error at cast!\n";
-			auto vec = logOp->GetColumnBindings();
-			for(auto col : vec){
-				std::cout<<" - "<<col.table_index<<" - "<<col.column_index<<" ";
-			}
-			std::cout<<"\n";
-			logOp->SplitPredicates();
-			for(auto& exp : logOp->expressions){
-				std::cout<<"exp2: "<<exp->GetName()<<"\n";
-				std::cout<<"alias2: "<<exp->alias<<"\n";
-			}
-			std::cout<<"\n";
-			op = unique_ptr<LogicalOperator>{static_cast<LogicalOperator*>(logOp.release())};
-			dsl_calcite = "";
+	case LogicalOperatorType::LOGICAL_ORDER_BY:
+	{
+		dsl_calcite = "LogicalSort(";
+		auto logOp = unique_ptr<LogicalOrder>{static_cast<LogicalOrder*>(op.release())};
+		if(!logOp) std::cout<<"Error at cast!\n";
+
+		for (idx_t i = 0; i < logOp->orders.size(); i++) {
+			dsl_calcite += "sort" + std::to_string(i) + "=[" + logOp->orders[i].expression->GetName() + "]";
+			dsl_calcite += ", ";
+			std::string order_type = logOp->orders[i].type == OrderType::ASCENDING ? "ASC" : "DESC";
+			dsl_calcite += "dir" + std::to_string(i) + "=[" + order_type + "]";
+
+			if(i<logOp->orders.size()-1)
+				dsl_calcite += ", ";
+		}
+
+		op = unique_ptr<LogicalOperator>{static_cast<LogicalOperator*>(logOp.release())};
+		dsl_calcite += "])";
+	}
 		break;
+	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+	{
+		auto logOp = unique_ptr<LogicalComparisonJoin>{static_cast<LogicalComparisonJoin*>(op.release())};
+		if(!logOp) std::cout<<"Error at cast!\n";
+
+		dsl_calcite += "LogicalJoin(condition=[";
+
+		for (auto &condition : logOp->conditions) {
+			auto expr = make_unique<BoundComparisonExpression>(condition.comparison, condition.left->Copy(),
+			                                                   condition.right->Copy());
+			dsl_calcite += expr->ToString();
+		}
+
+		dsl_calcite += "], joinType=[";
+		switch (logOp->join_type)
+		{
+		case JoinType::INNER:
+			dsl_calcite += "inner";
+			break;
+		default:
+			break;
+		}
+		dsl_calcite += "])";
+		op = unique_ptr<LogicalOperator>{static_cast<LogicalOperator*>(logOp.release())};
+	}
+	break;
+	case LogicalOperatorType::LOGICAL_PROJECTION:
+	{
+		LogicalProjection* logOp = static_cast<LogicalProjection*>(op.get());
+
+		string table;
+		if(!op->children.empty() && op->children[0]->type == LogicalOperatorType::LOGICAL_GET)
+		{
+			table = op->children[0]->ParamsToString();
+		}
+
+		string params = logOp->ParamsToString();
+		std::replace(params.begin(), params.end(), '\n', ',');
+		dsl_calcite = "BindableTableScan(table=[[";
+		dsl_calcite += table;
+		dsl_calcite += "]], aliases=[[";
+		dsl_calcite += params;
+		dsl_calcite += "]])";
+	}
+	break;
+	case LogicalOperatorType::LOGICAL_LIMIT:
+	{
+		LogicalLimit *logOp = static_cast<LogicalLimit *>(op.get());
+
+		dsl_calcite = "LogicalLimit(";
+		bool boffset = false;
+		if (logOp->offset_val > 0) {
+			boffset = true;
+			dsl_calcite += "offset=[";
+			dsl_calcite += std::to_string(logOp->offset_val);
+			dsl_calcite += "]";
+		}
+		if (logOp->limit_val < std::numeric_limits<int64_t>::max()) {
+			if(boffset) dsl_calcite += ", ";
+			dsl_calcite += "fetch=[";
+			dsl_calcite += std::to_string(logOp->limit_val);
+			dsl_calcite += "]";
+		}
+		dsl_calcite += ")";
+	}
+	break;
+	case LogicalOperatorType::LOGICAL_TOP_N:
+	{
+		struct top{
+			string type;
+			int32_t code;
+			int32_t column_idx;
+		};
+		vector<top> tops;
+
+		LogicalTopN *logOp = static_cast<LogicalTopN *>(op.get());
+
+		std::string cardinality = std::to_string(logOp->estimated_cardinality);
+		dsl_calcite = "LogicalSort(";
+
+		int32_t count = 0;
+		for(BoundOrderByNode& ord : logOp->orders){
+			count++;
+			top t;
+			t.code = count - 1;
+			if(ord.type == OrderType::ASCENDING) t.type = "ASC";
+			if(ord.type == OrderType::DESCENDING) t.type = "DESC";
+			if(ord.type == OrderType::ORDER_DEFAULT) t.type = "ASC";
+			BoundReferenceExpression* be = static_cast<BoundReferenceExpression*>(ord.expression.get());
+			t.column_idx = be->index;
+			tops.push_back(t);
+		}
+
+		count = 0;
+
+		string sorts;
+		for(top& t: tops){
+			sorts += ", sort" + std::to_string(t.code) + "=[$";
+			sorts += std::to_string(t.column_idx);
+			sorts += "]";
+		}
+		sorts.erase(0,2);
+		dsl_calcite += sorts;
+
+		for(top& t: tops){
+			dsl_calcite += ", dir" + std::to_string(t.code) + "=[";
+			dsl_calcite += t.type;
+			dsl_calcite += "]";
+		}
+
+		bool boffset = false;
+		if (logOp->offset > 0) {
+			boffset = true;
+			dsl_calcite += ", offset=[";
+			dsl_calcite += std::to_string(logOp->offset);
+			dsl_calcite += "]";
+		}
+		if (logOp->limit < std::numeric_limits<int64_t>::max()) {
+			if(boffset) dsl_calcite += ", ";
+			dsl_calcite += "fetch=[";
+			dsl_calcite += std::to_string(logOp->limit);
+			dsl_calcite += "]";
+		}
+		dsl_calcite += ")";
+	}
+	break;
+
+
+	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
+	{
+		dsl_calcite = "LOGICAL_AGGREGATE_AND_GROUP_BY";
+	} break;
+
+	case LogicalOperatorType::LOGICAL_INVALID:
+	{
+		dsl_calcite = "LOGICAL_INVALID";
+	} break;
+	case LogicalOperatorType::LOGICAL_WINDOW:
+	{
+		dsl_calcite = "LOGICAL_WINDOW";
+	} break;
+	case LogicalOperatorType::LOGICAL_UNNEST:
+	{
+		dsl_calcite = "LOGICAL_UNNEST";
+	} break;
+
+	case LogicalOperatorType::LOGICAL_COPY_TO_FILE:
+	{
+		dsl_calcite = "LOGICAL_COPY_TO_FILE";
+	} break;
+	case LogicalOperatorType::LOGICAL_DISTINCT:
+	{
+		dsl_calcite = "LOGICAL_DISTINCT";
+	} break;
+	case LogicalOperatorType::LOGICAL_SAMPLE:
+	{
+		dsl_calcite = "LOGICAL_SAMPLE";
+	} break;
+	case LogicalOperatorType::LOGICAL_CHUNK_GET:
+	{
+		dsl_calcite = "LOGICAL_CHUNK_GET";
+	} break;
+	case LogicalOperatorType::LOGICAL_DELIM_GET:
+	{
+		dsl_calcite = "LOGICAL_DELIM_GET";
+	} break;
+	case LogicalOperatorType::LOGICAL_EXPRESSION_GET:
+	{
+		dsl_calcite = "LOGICAL_EXPRESSION_GET";
+	} break;
+	case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
+	{
+		dsl_calcite = "LOGICAL_DUMMY_SCAN";
+	} break;
+	case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
+	{
+		dsl_calcite = "LOGICAL_EMPTY_RESULT";
+	} break;
+	case LogicalOperatorType::LOGICAL_CTE_REF:
+	{
+		dsl_calcite = "LOGICAL_CTE_REF";
+	} break;
+	case LogicalOperatorType::LOGICAL_JOIN:
+	{
+		dsl_calcite = "LOGICAL_JOIN";
+	} break;
+	case LogicalOperatorType::LOGICAL_DELIM_JOIN:
+	{
+		dsl_calcite = "LOGICAL_DELIM_JOIN";
+	} break;
+	case LogicalOperatorType::LOGICAL_ANY_JOIN:
+	{
+		dsl_calcite = "LOGICAL_ANY_JOIN";
+	} break;
+	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:
+	{
+		dsl_calcite = "LOGICAL_CROSS_PRODUCT";
+	} break;
+	case LogicalOperatorType::LOGICAL_UNION:
+	{
+		dsl_calcite = "LOGICAL_UNION";
+	} break;
+	case LogicalOperatorType::LOGICAL_EXCEPT:
+	{
+		dsl_calcite = "LOGICAL_EXCEPT";
+	} break;
+	case LogicalOperatorType::LOGICAL_INTERSECT:
+	{
+		dsl_calcite = "LOGICAL_INTERSECT";
+	} break;
+	case LogicalOperatorType::LOGICAL_RECURSIVE_CTE:
+	{
+		dsl_calcite = "LOGICAL_RECURSIVE_CTE";
+	} break;
+	case LogicalOperatorType::LOGICAL_INSERT:
+	{
+		dsl_calcite = "LOGICAL_INSERT";
+	} break;
+	case LogicalOperatorType::LOGICAL_DELETE:
+	{
+		dsl_calcite = "LOGICAL_DELETE";
+	} break;
+	case LogicalOperatorType::LOGICAL_UPDATE:
+	{
+		dsl_calcite = "LOGICAL_UPDATE";
+	} break;
+	case LogicalOperatorType::LOGICAL_ALTER:
+	{
+		dsl_calcite = "LOGICAL_ALTER";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_TABLE:
+	{
+		dsl_calcite = "LOGICAL_CREATE_TABLE";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_INDEX:
+	{
+		dsl_calcite = "LOGICAL_CREATE_INDEX";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_SEQUENCE:
+	{
+		dsl_calcite = "LOGICAL_CREATE_SEQUENCE";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_VIEW:
+	{
+		dsl_calcite = "LOGICAL_CREATE_VIEW";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_SCHEMA:
+	{
+		dsl_calcite = "LOGICAL_CREATE_SCHEMA";
+	} break;
+	case LogicalOperatorType::LOGICAL_CREATE_MACRO:
+	{
+		dsl_calcite = "LOGICAL_CREATE_MACRO";
+	} break;
+	case LogicalOperatorType::LOGICAL_DROP:
+	{
+		dsl_calcite = "LOGICAL_DROP";
+	} break;
+	case LogicalOperatorType::LOGICAL_PRAGMA:
+	{
+		dsl_calcite = "LOGICAL_PRAGMA";
+	} break;
+	case LogicalOperatorType::LOGICAL_TRANSACTION:
+	{
+		dsl_calcite = "LOGICAL_TRANSACTION";
+	} break;
+	case LogicalOperatorType::LOGICAL_EXPLAIN:
+	{
+		dsl_calcite = "LOGICAL_EXPLAIN";
+	} break;
+	case LogicalOperatorType::LOGICAL_SHOW:
+	{
+		dsl_calcite = "LOGICAL_SHOW";
+	} break;
+	case LogicalOperatorType::LOGICAL_PREPARE:
+	{
+		dsl_calcite = "LOGICAL_PREPARE";
+	} break;
+	case LogicalOperatorType::LOGICAL_EXECUTE:
+	{
+		dsl_calcite = "LOGICAL_EXECUTE";
+	} break;
+	case LogicalOperatorType::LOGICAL_EXPORT:
+	{
+		dsl_calcite = "LOGICAL_EXPORT";
+	} break;
+	case LogicalOperatorType::LOGICAL_VACUUM:
+	{
+		dsl_calcite = "LOGICAL_VACUUM";
+	} break;
+	case LogicalOperatorType::LOGICAL_SET:
+	{
+		dsl_calcite = "LOGICAL_SET";
+	} break;
+	case LogicalOperatorType::LOGICAL_LOAD:
+	{
+		dsl_calcite = "LOGICAL_LOAD";
+	} break;
 	}
 
+	printTabs();
+	std::cout<<dsl_calcite<<std::endl;
+
+	bool inner = false;
 	for(auto& child : op->children){
+		if(!inner) {
+			level++;
+			inner = true;
+		}
 		Imprimir(std::move(child));
 	}
+	if(inner) level--;
 }
 
 void ExecuteQuery(Connection &con, const string &query) {
 	// create the logical plan
-	auto plan = con.ExtractPlan(query);
+	unique_ptr<LogicalOperator> plan = con.ExtractPlan(query);
 	plan->Print();
 
 	Imprimir(std::move(plan));
@@ -734,3 +1127,12 @@ int MyExpressionExecutor::Execute(Expression &expression) {
 		throw std::runtime_error("Unsupported expression for expression executor " + expression.ToString());
 	}
 }
+
+int main() {
+	//RunExampleDuckDBCatalog();
+	//RunExampleTableScan();
+	RunCustomFunctionDuckDB();
+}
+
+
+
